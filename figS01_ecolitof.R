@@ -347,14 +347,21 @@ ggsave(filename = "../../figures/figS01_ecolitof.svg", width = 8, height = 10)
 cv_df <- data_fraction %>%
   group_by(dataset, ratio_id, peptide) %>%
   mutate(fraction_cv = (sd(fraction)/mean(fraction))) %>%
-  select(dataset, ratio_id, peptide, fraction_cv) %>%
-  distinct(dataset, ratio_id, peptide, fraction_cv)
+  group_by(dataset, ratio_id) %>%
+  mutate(fraction_cv_median = median(fraction_cv, na.rm = TRUE)) %>%
+  select(dataset, ratio_id,  peptide, fraction_cv, fraction_cv_median) %>%
+  distinct(dataset, ratio_id, peptide, fraction_cv, fraction_cv_median)
+
+temp <- unique(cv_df[, c('dataset', 'ratio_id', 'fraction_cv_median')])
 
 ggplot(cv_df, aes(x=fraction_cv, fill=dataset, color=dataset)) +
   geom_histogram(alpha = 0.5, bins = 100) +
   facet_grid(rows=vars(ratio_id)) +
+  geom_vline(data=temp, aes(xintercept=fraction_cv_median, color=dataset),
+             linetype="dashed") +
   scale_x_continuous(limits = c(-0.1, 1)) +
+  labs(x = "coefficient of variation") +
   theme_classic(base_size = 12)
 
 ggsave(filename = "../../figures/figS0x_ecolitof_cvs.svg", width = 8, height = 10)
-  
+
