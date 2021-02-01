@@ -13,7 +13,7 @@ library(patchwork)
 
 # DIA Peptide quant data
 # Output from Skyline post Encyclopedia
-dia_df <- import("data/ecoli_tof/schilling_swath_silac-ecoli_6600.csv")
+dia_df <- import("../../data/ecoli_tof/schilling_swath_silac-ecoli_6600.csv")
 
 # formatting names 
 data_dia <- dia_df %>% 
@@ -328,15 +328,33 @@ ms1_1 + ms1_2 + ms2_1 + ms2_2 +
               heights = c(4,4)) +
   plot_annotation(tag_levels = "A")
 
-<<<<<<< HEAD
-ggsave(filename = "figures/figS01_ecolitof.png", width = 8, height = 10)
-=======
-ggsave(filename = "figures/figS01_ecolitof.svg", width = 8, height = 10)
->>>>>>> a1e86ef636974444a7bde86d2cd24b2cd46918d0
+
+ggsave(filename = "../../figures/figS01_ecolitof.svg", width = 8, height = 10)
 
 
 ## calculate stats for n
-length(unique(ma_dia[ma_dia$heavy_ug == '1',]$peptide))
-length(unique(ma_dia[ma_dia$heavy_ug == '0.1',]$peptide))
-length(unique(ma_dia[ma_dia$heavy_ug == '0.01',]$peptide))
-length(unique(ma_dia[ma_dia$heavy_ug == '0.001',]$peptide))
+#length(unique(ma_dia[ma_dia$heavy_ug == '1',]$peptide))
+#length(unique(ma_dia[ma_dia$heavy_ug == '0.1',]$peptide))
+#length(unique(ma_dia[ma_dia$heavy_ug == '0.01',]$peptide))
+#length(unique(ma_dia[ma_dia$heavy_ug == '0.001',]$peptide))
+
+
+##
+## REVIEWER SUGGESTIONS
+##
+
+# make a plot comparing the MS1 versus MS2 coefficient of variation (CV)
+cv_df <- data_fraction %>%
+  group_by(dataset, ratio_id, peptide) %>%
+  mutate(fraction_cv = (sd(fraction)/mean(fraction))) %>%
+  select(dataset, ratio_id, peptide, fraction_cv) %>%
+  distinct(dataset, ratio_id, peptide, fraction_cv)
+
+ggplot(cv_df, aes(x=fraction_cv, fill=dataset, color=dataset)) +
+  geom_histogram(alpha = 0.5, bins = 100) +
+  facet_grid(rows=vars(ratio_id)) +
+  scale_x_continuous(limits = c(-0.1, 1)) +
+  theme_classic(base_size = 12)
+
+ggsave(filename = "../../figures/figS0x_ecolitof_cvs.svg", width = 8, height = 10)
+  
