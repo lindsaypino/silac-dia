@@ -1,4 +1,3 @@
-
 # Document Setup ----------------------------------------------------------
 
 
@@ -369,8 +368,8 @@ extract_pred <- function(data_model){
     unnest(best_fit) %>% 
     select(-data, -nls_model) %>% 
     ungroup(btz_conc) %>%
-    mutate(btz_conc = str_replace_all(btz_conc, "pM", " pM"),
-           btz_conc = factor(btz_conc, levels = c("DMSO", "1000 pM")))
+    mutate(btz_conc = str_replace_all(btz_conc, "1000pM", "bortezomib"),
+           btz_conc = factor(btz_conc, levels = c("DMSO", "bortezomib")))
   
   return(data_best_fit_line)
 }
@@ -519,7 +518,7 @@ diff_halflife <- function(tidy_data, uniprot_map){
     select("master_protein_accessions", "sequence", "btz_conc", "half_life") %>%
     distinct(.) %>%
     mutate(log2_halflife = ifelse(is.na(half_life), log2(.Machine$double.eps), log2(half_life))) %>%  # TODO what does it mean if half_life is NA? means that k_deg was NA?
-    mutate(btz_conc = factor(btz_conc, levels = c("1000 pM", "DMSO")))
+    mutate(btz_conc = factor(btz_conc, levels = c("bortezomib", "DMSO")))
   
   # define the linear model performed on categorical data (DMSO/btz conditions), e.g. an ANOVA
   tidy_anova <- function(data){
@@ -551,7 +550,7 @@ diff_halflife <- function(tidy_data, uniprot_map){
     group_by(master_protein_accessions, btz_conc,estimate, std.error, statistic, p.value) %>% 
     summarise(log2_prot_halflife = mean(log2_halflife)) %>% 
     spread(btz_conc,log2_prot_halflife)  %>% 
-    mutate(log2fc_halflife = `1000 pM` - DMSO) %>%
+    mutate(log2fc_halflife = bortezomib - DMSO) %>%
     ungroup() %>%
     mutate(adj.p.value = p.adjust(p.value, method = "BH")) %>%   
     ungroup()
@@ -645,7 +644,7 @@ plot_volcano_fc <- function(diff_data){
 
 plot_volcano_delta <- function(diff_data){
   
-  volcano_delta <- ggplot(diff_data, aes(x = (2^(`1000 pM`) - 2^(DMSO)), y = -log10(adj.p.value))) +  
+  volcano_delta <- ggplot(diff_data, aes(x = (2^(bortezomib) - 2^(DMSO)), y = -log10(adj.p.value))) +  
     geom_point() +
     theme_bw()  +
     geom_text_repel(aes(label = ifelse(adj.p.value < 0.01, gene_name, ""), 
@@ -692,7 +691,7 @@ plot_halflife <- function(diff_data){
   halflife_hist <- ggplot(diff_data) +  
     geom_histogram(aes(x = DMSO),
                    fill=cbPalette[1], color=cbPalette[1], alpha=0.5, bins=100) +  
-    geom_histogram(aes(x = `1000 pM`),
+    geom_histogram(aes(x = bortezomib),
                    fill=cbPalette[2], color=cbPalette[2], alpha=0.5, bins=100) +
     theme_bw(base_size = 14) +
     xlim(2, 16)+
