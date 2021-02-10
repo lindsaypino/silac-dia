@@ -428,14 +428,9 @@ dda1 <- ggplot(ma_dda) +
   theme_classic(base_size = 12) +
   guides(color = FALSE) +
   labs(y = expression(Log[10]~(Heavy/Light)),
-<<<<<<< HEAD
-       x = expression(Log[2]~DDA~Heavy~abundance)) +
-  scale_color_brewer(palette = "Set1")
-=======
        x = expression(Log[2]~DDA~Heavy~abundance),
        title = "DDA") +
   scale_color_manual(values=cbPalette)
->>>>>>> a1e86ef636974444a7bde86d2cd24b2cd46918d0
 
 # DDA Boxplot
 dda2 <- ggplot(ma_dda) +
@@ -485,12 +480,8 @@ dia1 <- ggplot(ma_dia) +
   scale_x_continuous(limits = c(10, 35)) +
   theme_classic(base_size = 12) +
   labs(y = expression(Log[10]~(Heavy/Light)),
-<<<<<<< HEAD
-       x = expression(Log[2]~DIA~Heavy~abundance)) +
-=======
        x = expression(Log[2]~DIA~Heavy~abundance),
        title = "DIA") +
->>>>>>> a1e86ef636974444a7bde86d2cd24b2cd46918d0
   guides(color = FALSE) +
   scale_color_manual(values=cbPalette)
 
