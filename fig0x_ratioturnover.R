@@ -192,12 +192,13 @@ process_dda_mm <- function(quant_file, annotations){
     rename(abundance = "peak_intensity", sequence = "peptideseq", 
            #peptide_modified_sequence = "full_sequence",
            `File Name` = "file_name", master_protein_accessions = "protein_group") %>%
+    mutate(abundance = if_else(is.na(abundance), 0, abundance)) %>% 
     select(`File Name`, sequence, peptidemodseq, 
            isotope, abundance, master_protein_accessions) %>%
     distinct(`File Name`, sequence, peptidemodseq, 
              isotope, abundance, master_protein_accessions, .keep_all = TRUE)
   
-  tidy_dda$abundance <- tidy_dda$abundance + 1
+  #tidy_dda$abundance <- tidy_dda$abundance + 1
   
   # Calculating fraction Heavy / Total
   data_ria <- tidy_dda %>% 
@@ -233,11 +234,11 @@ process_dia <- function(skyline_df, annotations, peptoprot_df){
   peptoprot_df$master_protein_accessions <- gsub('\\|.*_HUMAN;', ';', peptoprot_df$master_protein_accessions)  # remove gene names for all 'internal' proteins in group
   peptoprot_df$master_protein_accessions <- gsub('\\|.*_HUMAN', '', peptoprot_df$master_protein_accessions)  # remove gene name from only/last protein in group
   peptoprot_df$master_protein_accessions <- gsub(';', '; ', peptoprot_df$master_protein_accessions)  # format to match conventions
-  
-  
+
   temp <- skyline_df %>%
     rename(`File Name` = Replicate) %>%
     select(`File Name`, `Peptide Modified Sequence`, `Isotope Label Type`, `Total Area Fragment`) %>%
+    mutate(`Total Area Fragment` = if_else(is.na(`Total Area Fragment`), 0, `Total Area Fragment`)) %>% 
     mutate(`Peptide Modified Sequence` = str_remove_all(`Peptide Modified Sequence`, "\\[\\+57]")) %>%  # Removing carbamidomethylation
     distinct(`File Name`, `Peptide Modified Sequence`, `Isotope Label Type`, `Total Area Fragment`, .keep_all = TRUE) %>%
     spread(`Isotope Label Type`, `Total Area Fragment`)  %>% # reshape isotope label quants into same row
@@ -282,6 +283,7 @@ dia_input <- process_dia(skyline_quant, metadata_df, encyc_matrix)
 rm(skyline_quant, metadata_df, encyc_matrix);gc()
 
 
+
 ## PLOT: Check the fractional incorporation stacked density plot
 plot_incorporation <- function(data_input){
   ggplot(data_input) +
@@ -303,6 +305,51 @@ ggsave(filename = "../../figures/ratios_model_plots/exploratory_frxincorporation
 
 rm(plot5_dda, plot5_dia);gc()
 
+
+#############################################
+## FILTER FOR ABUNDANCE ASSUMPTIONS
+## UNION OF LIST FOR DDA AND DIA TO BE FAIR
+#dda_keep <- subset(dda_input, (time_hrs == 500) & (fraction > 0.45) & (fraction < 0.55))
+#dia_keep <- subset(dia_input, (time_hrs == 500) & (fraction > 0.45) & (fraction < 0.55))
+#dda_keep <- subset(dda_input, (time_hrs == 1000) & (fraction > 0.9))
+#dia_keep <- subset(dia_input, (time_hrs == 1000) & (fraction > 0.9))
+#newlist <- c(dda_keep, dia_keep)
+#pep_keep <- unique(newlist[['sequence']])
+#dda_input <- subset(dda_input, sequence %in% unique(pep_keep))
+#dia_input <- subset(dia_input, sequence %in% unique(pep_keep))
+
+#############################################
+## SPLIT EACH DDA AND DIA INTO REPLICATE 1 AND REPLICATE 2 (RANDOM PICK)
+
+rep1_dda <- dda_input %>% 
+  group_by(time_hrs) %>% 
+  sample_n(1) %>% 
+  select(`File Name`) %>% 
+  distinct(`File Name`)
+rep1_dda <- rep1_dda$`File Name`
+rep2_dda <- dda_input %>% 
+  filter(!`File Name` %in% rep1_dda) %>%
+  group_by(time_hrs) %>% 
+  sample_n(1) %>% 
+  select(`File Name`) %>% 
+  distinct(`File Name`)
+rep2_dda <- rep2_dda$`File Name`
+
+rep1_dia <- dia_input %>% 
+  group_by(time_hrs) %>% 
+  sample_n(1) %>% 
+  select(`File Name`) %>% 
+  distinct(`File Name`)
+rep1_dia <- rep1_dia$`File Name`
+rep2_dia <- dia_input %>% 
+  filter(!`File Name` %in% rep1_dia) %>%
+  group_by(time_hrs) %>% 
+  sample_n(1) %>% 
+  select(`File Name`) %>% 
+  distinct(`File Name`)
+rep2_dia <- rep2_dia$`File Name`
+
+
 # Fitting the model -------------------------------------------------------
 
 # Function to count the number of time points for each protein 
@@ -320,14 +367,14 @@ non_linear_least_squares <- function(data){
   tryCatch(
     nls(
       #fraction ~ (1 - exp(-k_deg * time)),  # frx labeled (heavy)
-      fraction ~ (exp(-(k_deg * time_hrs))),  # frx unlabeled
+      fraction ~ (exp((-1*k_deg)*time_hrs)),  # frx unlabeled
       data = data,
       control = nls.control(maxiter = 1000, minFactor = 1/1024, warnOnly = TRUE),
       start = list(
         k_deg = abs(getInitial(fraction ~ SSasymp(time_hrs, Asym, lrc, R0 = 0), data = data)[[2]])
       )
-    ),
-    error = function(e) NA,
+    ), 
+    error = function(e) NA, 
     warning = function(w) NA
   )
 }
@@ -344,11 +391,12 @@ fit_nonlinear <- function(data_input){
   # nest and filter the dataframe
   data_model <- data_input %>% 
     filter(!is.na(fraction)) %>% 
+    filter(fraction > 0) %>%  # new! filter finite fractions
     group_by(sequence, master_protein_accessions) %>% 
     nest() %>% 
     mutate(n = map_dbl(data, nrow),
-           time_n = map_dbl(data, time_count)) %>%
-    filter(time_n > 8)  # ADDED TIME_N FILTER
+           time_n = map_dbl(data, time_count)) #%>%
+    #filter(time_n > 8)  # ADDED TIME_N FILTER <- REMOVE FILTER, DROPS TOO MANY PROTEINS
   
   # run the nonlinear least squares model across the dataframe
   data_model <- data_model %>%
@@ -358,8 +406,10 @@ fit_nonlinear <- function(data_input){
   return(data_model)
 }
 
-model_dda <- fit_nonlinear(dda_input)
-model_dia <- fit_nonlinear(dia_input)
+model_dda_rep1 <- fit_nonlinear((dda_input %>% filter(`File Name` %in% rep1_dda)))
+model_dda_rep2 <- fit_nonlinear((dda_input %>% filter(`File Name` %in% rep2_dda)))
+model_dia_rep1 <- fit_nonlinear((dia_input %>% filter(`File Name` %in% rep1_dia)))
+model_dia_rep2 <- fit_nonlinear((dia_input %>% filter(`File Name` %in% rep2_dia)))
 
 # Function to unnest the model predictions
 extract_pred <- function(data_model){
@@ -371,8 +421,11 @@ extract_pred <- function(data_model){
   return(data_best_fit_line)
 }
 
-pred_dda <- extract_pred(model_dda)
-pred_dia <- extract_pred(model_dia)
+pred_dda_rep1 <- extract_pred(model_dda_rep1)
+pred_dda_rep2 <- extract_pred(model_dda_rep2)
+pred_dia_rep1 <- extract_pred(model_dia_rep1)
+pred_dia_rep2 <- extract_pred(model_dia_rep2)
+
 
 # color blind palette
 cbPalette <- c("#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7")
@@ -396,16 +449,16 @@ plot_predictions <- function(data_best_fit_line){
       x = "Time (hours)")
 }
 
-plot4_dda <- plot_predictions(pred_dda) + 
-  labs(title = "DDA") + 
-  theme(plot.title = element_text(hjust = 0.5, size=36))
-plot4_dia <- plot_predictions(pred_dia) + 
-  labs(title = "DIA") +
-  theme(plot.title = element_text(hjust = 0.5, size=36))
+#plot4_dda <- plot_predictions(pred_dda) + 
+#  labs(title = "DDA") + 
+#  theme(plot.title = element_text(hjust = 0.5, size=36))
+#plot4_dia <- plot_predictions(pred_dia) + 
+#  labs(title = "DIA") +
+#  theme(plot.title = element_text(hjust = 0.5, size=36))
 
-plot4_dda / plot4_dia +
-  plot_annotation(tag_levels = "A")
-ggsave(filename = "../../figures/ratios_model_plots/model_turnover_rate_profile.svg", width = 10, height = 14)
+#plot4_dda / plot4_dia +
+#  plot_annotation(tag_levels = "A")
+#ggsave(filename = "../../figures/ratios_model_plots/model_turnover_rate_profile.svg", width = 10, height = 14)
 #rm(pred_dda, pred_dia);gc()
 
 
@@ -421,19 +474,72 @@ extract_tidydata <- function(data_model){
   return(model_tidy)
 }
 
-tidy_dda <- extract_tidydata(model_dda)
-tidy_dia <- extract_tidydata(model_dia)
+tidy_dda_rep1 <- extract_tidydata(model_dda_rep1)
+tidy_dda_rep2 <- extract_tidydata(model_dda_rep2)
+tidy_dia_rep1 <- extract_tidydata(model_dia_rep1)
+tidy_dia_rep2 <- extract_tidydata(model_dia_rep2)
 rm(model_dda, model_dia);gc()
+
+names(tidy_dda_rep1)[names(tidy_dda_rep1) == 'half_life'] <- 'half_life_rep1'
+names(tidy_dda_rep2)[names(tidy_dda_rep2) == 'half_life'] <- 'half_life_rep2'
+names(tidy_dia_rep1)[names(tidy_dia_rep1) == 'half_life'] <- 'half_life_rep1'
+names(tidy_dia_rep2)[names(tidy_dia_rep2) == 'half_life'] <- 'half_life_rep2'
+tidy_dda <- merge(tidy_dda_rep1,tidy_dda_rep2, by='sequence')
+tidy_dia <- merge(tidy_dia_rep1,tidy_dia_rep2, by='sequence')
+
+## PLOT: Half life correlations between replicates
+plot_halfliferep_corr <- function(tidy_data){
+  ggplot(data=tidy_data) +
+    geom_point(aes(x = log2(half_life_rep1/24), y=log2(half_life_rep2/24))) +
+    geom_smooth(method="lm",aes(x = log2(half_life_rep1/24), y=log2(half_life_rep2/24)),se=F) +
+    scale_color_brewer(palette = "Dark2") +
+    theme_light(base_size = 14) +
+    geom_abline(intercept=0, slope=1, color="red") +  
+    labs(x = "Rep 1, log2 Half Life (days)",
+         y = "Rep 2, log2 Half Life (days)")
+}
+
+lm_eqn <- function(x,y){
+  # browser()
+  m <- lm(y ~ x)
+  a <- coef(m)[1]
+  a <- ifelse(sign(a) >= 0, 
+              paste0(" + ", format(a, digits = 4)), 
+              paste0(" - ", format(-a, digits = 4))  )
+  r2 <- format(summary(m)$r.squared, digits = 3)
+}
+
+r2_dda <- lm_eqn(log2(tidy_dda$half_life_rep2/24), log2(tidy_dda$half_life_rep1/24))
+r2_dia <- lm_eqn(log2(tidy_dia$half_life_rep2/24), log2(tidy_dia$half_life_rep1/24))
+
+rep_corr_dda <- plot_halfliferep_corr(tidy_dda) + labs(subtitle = "DDA") +
+  xlim(min=-7,max=15) +
+  annotate(geom = 'text', label = paste( "(R)^2 =", r2_dda ), 
+           x = 10, 
+           y = -5, 
+           hjust = 0, vjust = 0)
+rep_corr_dia <- plot_halfliferep_corr(tidy_dia) + labs(subtitle = "DIA") +
+  xlim(min=-7,max=15) +
+  annotate(geom = 'text', label = paste( "(R)^2 =", r2_dia ), 
+           x = 10, 
+           y = -5, 
+           hjust = 0, vjust = 0)
+
+rep_corr_dda / rep_corr_dia +
+  plot_annotation(tag_levels = "A", title="Correlation between rep1 and rep2 half lives")
+ggsave(filename = "../../figures/ratios_model_plots/rep_correlation_half_life.png")
+
 
 
 ## PLOT: Half life distribution
 plot_halflife_dist <- function(model_tidy){
   ggplot(model_tidy %>% filter(p.value < 0.05)) +
-    geom_density(aes(x = half_life/24)) +
+    geom_density(aes(x = log2(half_life/24))) +
     scale_color_brewer(palette = "Dark2") +
     theme_light(base_size = 14) +
+    geom_vline(xintercept=log2(500/24)) +  # "known" half life is the 50/50 sample
     labs(title = "Half life distribution", 
-         x = "Half Life (days)")
+         x = "log2 Half Life (days)")
 }
 
 plot2_dda <- plot_halflife_dist(tidy_dda) + labs(subtitle = "DDA")
@@ -463,104 +569,20 @@ plot3_dda / plot3_dia +
 ggsave(filename = "../../figures/ratios_model_plots/density_turnover_rate_k.png")
 rm(plot3_dda, plot3_dia);gc()
 
+
+##
+## TODO
+## HERE
+##
+
+
 # Statistics --------------------------------------------------------------
 
-## use the tidy_d*a data to find proteins with differential halflives 
-## use the distribution of *peptide* halflives for each protein
-## and compare between the two conditions using linear model
-
-diff_halflife <- function(tidy_data, uniprot_map){
-  
-  # first, melt the dataframe to long form 
-  tidy_long <- melt(tidy_data, c("master_protein_accessions", "sequence", "btz_conc", "half_life"))
-  
-  tidy_long <- tidy_long %>% 
-    select("master_protein_accessions", "sequence", "btz_conc", "half_life") %>%
-    distinct(.) %>%
-    mutate(log2_halflife = ifelse(is.na(half_life), log2(.Machine$double.eps), log2(half_life)))  # TODO what does it mean if half_life is NA? means that k_deg was NA?
-  
-  # define the linear model performed on categorical data (DMSO/btz conditions), e.g. an ANOVA
-  tidy_anova <- function(data){
-    
-    # needs exception check bc some proteins don't have measurements for both conditions
-    tryCatch(
-      lm(log2_halflife ~ btz_conc,  # linear model itself
-         data = data),
-      error = function(e) NA,
-      warning = function(w) NA
-    )
-  }
-  
-  # This step performs the model
-  quant_nest <- tidy_long %>% 
-    group_by(master_protein_accessions) %>% 
-    nest() %>% 
-    mutate(model_data = map(data, tidy_anova)) %>%
-    filter(!is.na(model_data))
-  
-  # This chunk cleans up the output of the model we just performed
-  model_data <- quant_nest %>% 
-    mutate(model_tidy = map(model_data, tidy)) %>% 
-    select(-model_data) %>% 
-    unnest(model_tidy) %>% 
-    unnest(data) %>%
-    filter(term != "(Intercept)") %>%
-    # now need to group by protein, calculate average delta half life
-    group_by(master_protein_accessions, btz_conc,estimate, std.error, statistic, p.value) %>% 
-    summarise(log2_prot_halflife = mean(log2_halflife)) %>% 
-    spread(btz_conc,log2_prot_halflife)  %>% 
-    mutate(log2fc_halflife = bortezomib - DMSO) %>%
-    ungroup() %>%
-    mutate(adj.p.value = p.adjust(p.value, method = "BH")) %>%   
-    ungroup()
-  
-  # map master_protein_accessions from uniprot to gene names
-  #model_data$gene_name <- ConvertID(model_data$master_protein_accessions, 
-  #                                  ID_from = "ACC+ID", 
-  #                                  ID_to = "GENENAME", 
-  #                                  directorypath = NULL)[,2]
-  
-  model_data <- model_data %>%
-    inner_join(.,uniprot_map, by="master_protein_accessions") %>%
-    rename(gene_name = "Entry name")
-  
-  return(model_data)
-}
-
-##
-## VOLCANO PLOTS
-##
-
-uniprot_annotations <- read_tsv(file = "data/uniprot-proteome_UP000005640.tab")
-uniprot_annotations$`Entry name` <- gsub("_HUMAN", "", uniprot_annotations$`Entry name`)
-uniprot_annotations <- uniprot_annotations %>%
-  rename(master_protein_accessions = Entry)
-
-diff_dda <- diff_halflife(tidy_dda, uniprot_annotations)
-diff_dia <- diff_halflife(tidy_dia, uniprot_annotations)
-
-extract_model_factors <- function(data_in, shared_proteins){
-  data_out <- data_in %>%
-    #filter(master_protein_accessions %in% shared_proteins)  %>% 
-    select(master_protein_accessions, btz_conc, estimate, half_life, time_n) %>%
-    group_by(master_protein_accessions, btz_conc) %>%
-    spread(btz_conc, half_life) %>%
-    mutate(peptide_n = n(), mean_estimate = mean(estimate),
-           min_time_n = min(time_n), max_time_n = max(time_n)) %>%
-    #ungroup() %>%
-    distinct(master_protein_accessions, min_time_n, max_time_n, peptide_n) %>%
-    distinct(master_protein_accessions, min_time_n, max_time_n, peptide_n)
-  
-  return(data_out)
-}
-
-modeled_proteins <- intersect(diff_dda$master_protein_accessions, 
-                              diff_dia$master_protein_accessions)
+modeled_proteins <- intersect(pred_dda$master_protein_accessions, 
+                              pred_dia$master_protein_accessions)
 
 modelfactors_dda <- extract_model_factors(tidy_dda, modeled_proteins)
 modelfactors_dia <- extract_model_factors(tidy_dia, modeled_proteins)
-
-
 
 
 diff_dia <- diff_dia %>%
@@ -572,73 +594,6 @@ diff_dda <- diff_dda %>%
 
 write.csv(diff_dda, file = "results/btz_results_dda.csv", row.names = FALSE)
 write.csv(diff_dia, file = "results/btz_results_dia.csv", row.names = FALSE)
-
-
-
-plot_pvalues <- function(diff_data){
-  
-  # Make a p value histogram of the model results
-  pvalue_plot <- ggplot(diff_data) +  # using the "model_data" data set...
-    geom_histogram(aes(x = p.value), bins = 30) +  # ... make a histogram of the pvalues
-    geom_vline(xintercept = 0.05, linetype = "dashed", color = "red", size = 1)  # add a red line at p=0.05
-  
-  return(pvalue_plot)
-  
-}
-
-plot_volcano_fc <- function(diff_data){
-  
-  
-  volcano_fc <- ggplot(diff_data, aes(x = (log2fc_halflife), y = -log10(adj.p.value))) +  
-    geom_point() +
-    theme_bw(base_size = 14) +
-    geom_text_repel(aes(label = ifelse(adj.p.value < 0.01, gene_name, ""))) +
-    labs(x = expression(Log[2]~(hours[btz]/hours[DMSO])),
-         y = expression(-Log[10]~p.value~(fdr~corrected))) +
-    xlim(-17,17)
-  
-  
-  return(volcano_fc)
-}
-
-plot_volcano_delta <- function(diff_data){
-  
-  volcano_delta <- ggplot(diff_data, aes(x = (2^(bortezomib) - 2^(DMSO)), y = -log10(adj.p.value))) +  
-    geom_point() +
-    theme_bw()  +
-    geom_text_repel(aes(label = ifelse(adj.p.value < 0.01, gene_name, ""), 
-                        size=18),
-                    box.padding = 1,
-                    show.legend = FALSE) + 
-    theme(text = element_text(size=20),
-          axis.text.x = element_text(size=18),
-          axis.text.y = element_text(size=18)) +
-    labs(x = "change in half life (btz - DMSO)",
-         y = expression(-Log[10]~p.value~(fdr~corrected))) +
-    xlim(-750,750)
-  
-}
-
-
-volcano_dda <- plot_volcano_delta(diff_dda)
-volcano_dia <- plot_volcano_delta(diff_dia)
-
-volcano2_dda <- plot_volcano_fc(diff_dda)
-volcano2_dia <- plot_volcano_fc(diff_dia)
-
-# Patchwork to piece each element into one figure
-volcano_dda / volcano_dia +
-  plot_annotation(tag_levels = "A")
-
-ggsave(filename = "figures/btz_model_plots/volcano.svg", width = 7, height = 10)
-
-# Patchwork to piece each element into one figure
-(plot4_dda + plot4_dia) / (volcano2_dda + volcano2_dia) +
-  plot_layout() + 
-  plot_annotation(tag_levels = "A")
-
-ggsave(filename = "figures/fig04_bortezomib.svg", width = 14, height = 14)
-
 
 
 ## halflife histograms per Birgit's suggestion
