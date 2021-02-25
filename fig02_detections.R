@@ -180,11 +180,11 @@ process_dia <- function(elib_files){
 
 # Single-shot detections ------------------------------------------------------
 
-dia_inputlist <- dir("./data/dda_vs_dia/", pattern = "*.mzML.elib", 
+dia_inputlist <- dir("../../data/dda_vs_dia/", pattern = "*.mzML.elib", 
                      full.names = TRUE, ignore.case = TRUE)
 
 # Read in the single-shot DDA and DIA data
-data_detect <- bind_rows(process_dda_metamorpheus("data/dda_vs_dia/results_metamorpheus/Task1-silac_multiplex/AllPeptides.psmtsv"), 
+data_detect <- bind_rows(process_dda_metamorpheus("../../data/dda_vs_dia/results_metamorpheus/Task1-silac_multiplex/AllPeptides.psmtsv"), 
                   process_dia(dia_inputlist))
 
 data_detect <- data_detect %>%
@@ -227,11 +227,11 @@ data_detect <- merge(data_detect, runrepmap, by="run")
 
 # Fractionation detections ------------------------------------------------------
 
-gpf_inputlist <- dir("./data/fractionation/", pattern = "*.elib", 
+gpf_inputlist <- dir("../../data/fractionation/", pattern = "*.elib", 
                      full.names = TRUE, ignore.case = TRUE)
 
 # Read in the fractionated DDA and DIA data
-data_frx <- bind_rows(process_dda("data/fractionation/20200315_QEHFX_lkp_silacdia_hprp__PSMs.txt"), 
+data_frx <- bind_rows(process_dda("../../data/fractionation/20200315_QEHFX_lkp_silacdia_hprp__PSMs.txt"), 
                          process_dia(gpf_inputlist))
 
 data_frx <- data_frx %>%
@@ -253,7 +253,7 @@ data_frx <- within(data_frx,
 
 # Windowing detections ----------------------------------------------------
 
-windowing_inputlist <- dir("./data/windowing/", pattern = "*.elib", 
+windowing_inputlist <- dir("../../data/windowing/", pattern = "*.elib", 
                      full.names = TRUE, ignore.case = TRUE)
 
 # Read in the window scheme comparison DIA data
@@ -266,7 +266,8 @@ data_windows <- data_windows %>%
                         "sample", "acquisition", "method", "run"), "_") %>% 
   mutate(isotope = factor(isotope, levels = c("light", "heavy")),
          method = factor(method, levels = c("25x24mzol", "50x12mz",
-                                            "75x8mz", "75x8mzol")))
+                                            "75x8mz", "75x8mzol"))) %>%
+  filter(method %in% c("75x8mz", "75x8mzol"))  # remove incorrect method acquisitions
 
 data_windows <- within(data_windows, 
                        method = factor(method, 
@@ -357,4 +358,4 @@ singleshot_detect / window_detect +
   plot_layout(heights = c(3, 1)) +
   plot_annotation(tag_levels = "A")
 
-ggsave(filename = "figures/fig02_detections.svg", width = 7, height =14)
+ggsave(filename = "../../figures/fig02_detections.svg", width = 7, height =14)
