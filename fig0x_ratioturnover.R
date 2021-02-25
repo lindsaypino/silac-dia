@@ -535,15 +535,15 @@ r2_dia <- lm_eqn(log2(tidy_dia$half_life_rep2/24), log2(tidy_dia$half_life_rep1/
 
 # make each correlation plot, plus a few specific parameters to make it prettier
 rep_corr_dda <- plot_halfliferep_corr(tidy_dda) + labs(subtitle = "DDA") +
-  xlim(min=-7,max=15) + 
-  ylim(min=-10,max=15) +
+  xlim(min=-15,max=15) + 
+  ylim(min=-15,max=15) +
   annotate(geom = 'text', label = paste( "(R)^2 =", r2_dda ), 
            x = 10, 
            y = -5, 
            hjust = 0, vjust = 0)
 rep_corr_dia <- plot_halfliferep_corr(tidy_dia) + labs(subtitle = "DIA") +
-  xlim(min=-7,max=15) +
-  ylim(min=-10,max=15) +
+  xlim(min=-15,max=15) +
+  ylim(min=-15,max=15) +
   annotate(geom = 'text', label = paste( "(R)^2 =", r2_dia ), 
            x = 10, 
            y = -5, 
@@ -551,7 +551,7 @@ rep_corr_dia <- plot_halfliferep_corr(tidy_dia) + labs(subtitle = "DIA") +
 
 rep_corr_dda / rep_corr_dia +
   plot_annotation(tag_levels = "A", title="Correlation between rep1 and rep2 half lives")
-ggsave(filename = "../../figures/ratios_model_plots/rep_correlation_half_life.png")
+ggsave(filename = "../../figures/ratios_model_plots/rep_correlation_half_life.png", width = 7, height =14)
 
 #####################################################
 
