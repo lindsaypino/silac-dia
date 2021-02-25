@@ -1,8 +1,9 @@
 # Document Setup ----------------------------------------------------------
-
+set.seed(1234)
 
 options(stringsAsFactors = FALSE)
 library(tidyverse)
+library(dplyr)
 library(rio)
 library(lubridate)
 library(broom)
@@ -319,7 +320,8 @@ rm(plot5_dda, plot5_dia);gc()
 #dia_input <- subset(dia_input, sequence %in% unique(pep_keep))
 
 #############################################
-## SPLIT EACH DDA AND DIA INTO REPLICATE 1 AND REPLICATE 2 (RANDOM PICK)
+## SPLIT EACH DDA AND DIA INTO REPLICATE 1 AND REPLICATE 2
+# randomly pick 1 file from each concentration point
 
 rep1_dda <- dda_input %>% 
   group_by(time_hrs) %>% 
@@ -469,7 +471,8 @@ extract_tidydata <- function(data_model){
     unnest(tidy_model) %>% 
     select(-data, -nls_model) %>% 
     # estimate is the value of k_deg, this converts k_deg to hours
-    mutate(half_life = log(2)/estimate)
+    mutate(half_life = log(2)/estimate) %>%
+    mutate(half_life_stderr = log(2)/std.error)
   
   return(model_tidy)
 }
@@ -480,6 +483,7 @@ tidy_dia_rep1 <- extract_tidydata(model_dia_rep1)
 tidy_dia_rep2 <- extract_tidydata(model_dia_rep2)
 rm(model_dda, model_dia);gc()
 
+# label the half life columns to merge the replicates into a single df
 names(tidy_dda_rep1)[names(tidy_dda_rep1) == 'half_life'] <- 'half_life_rep1'
 names(tidy_dda_rep2)[names(tidy_dda_rep2) == 'half_life'] <- 'half_life_rep2'
 names(tidy_dia_rep1)[names(tidy_dia_rep1) == 'half_life'] <- 'half_life_rep1'
@@ -487,16 +491,32 @@ names(tidy_dia_rep2)[names(tidy_dia_rep2) == 'half_life'] <- 'half_life_rep2'
 tidy_dda <- merge(tidy_dda_rep1,tidy_dda_rep2, by='sequence')
 tidy_dia <- merge(tidy_dia_rep1,tidy_dia_rep2, by='sequence')
 
+# calculate a min and max stderr for error bars in scatterplot below
+# INCORRECT! stderr from lmfit isn't what I think it is
+tidy_dda$min_halflife_x <- tidy_dda$half_life_rep1 - tidy_dda$half_life_stderr.x
+tidy_dda$min_halflife_y <- tidy_dda$half_life_rep2 - tidy_dda$half_life_stderr.y
+tidy_dia$min_halflife_x <- tidy_dia$half_life_rep1 - tidy_dia$half_life_stderr.x
+tidy_dia$min_halflife_y <- tidy_dia$half_life_rep2 - tidy_dia$half_life_stderr.y
+tidy_dda$max_halflife_x <- tidy_dda$half_life_rep1 + tidy_dda$half_life_stderr.x
+tidy_dda$max_halflife_y <- tidy_dda$half_life_rep2 + tidy_dda$half_life_stderr.y
+tidy_dia$max_halflife_x <- tidy_dia$half_life_rep1 + tidy_dia$half_life_stderr.x
+tidy_dia$max_halflife_y <- tidy_dia$half_life_rep2 + tidy_dia$half_life_stderr.y
+
+#####################################################
 ## PLOT: Half life correlations between replicates
+# to add x and y std err bars:
+# https://stackoverflow.com/questions/9231702/ggplot2-adding-two-errorbars-to-each-point-in-scatterplot
 plot_halfliferep_corr <- function(tidy_data){
-  ggplot(data=tidy_data) +
-    geom_point(aes(x = log2(half_life_rep1/24), y=log2(half_life_rep2/24))) +
+  ggplot(data=tidy_data, aes(x = log2(half_life_rep1/24), y=log2(half_life_rep2/24))) +
+    geom_point() +
     geom_smooth(method="lm",aes(x = log2(half_life_rep1/24), y=log2(half_life_rep2/24)),se=F) +
     scale_color_brewer(palette = "Dark2") +
     theme_light(base_size = 14) +
     geom_abline(intercept=0, slope=1, color="red") +  
     labs(x = "Rep 1, log2 Half Life (days)",
-         y = "Rep 2, log2 Half Life (days)")
+         y = "Rep 2, log2 Half Life (days)") #+
+    #geom_errorbar(aes(ymin = min_halflife_y, ymax = max_halflife_y)) + 
+    #geom_errorbarh(aes(xmin = min_halflife_x, xmax = max_halflife_x))
 }
 
 lm_eqn <- function(x,y){
@@ -509,17 +529,21 @@ lm_eqn <- function(x,y){
   r2 <- format(summary(m)$r.squared, digits = 3)
 }
 
+# calculate R^2 for the correlation
 r2_dda <- lm_eqn(log2(tidy_dda$half_life_rep2/24), log2(tidy_dda$half_life_rep1/24))
 r2_dia <- lm_eqn(log2(tidy_dia$half_life_rep2/24), log2(tidy_dia$half_life_rep1/24))
 
+# make each correlation plot, plus a few specific parameters to make it prettier
 rep_corr_dda <- plot_halfliferep_corr(tidy_dda) + labs(subtitle = "DDA") +
-  xlim(min=-7,max=15) +
+  xlim(min=-7,max=15) + 
+  ylim(min=-10,max=15) +
   annotate(geom = 'text', label = paste( "(R)^2 =", r2_dda ), 
            x = 10, 
            y = -5, 
            hjust = 0, vjust = 0)
 rep_corr_dia <- plot_halfliferep_corr(tidy_dia) + labs(subtitle = "DIA") +
   xlim(min=-7,max=15) +
+  ylim(min=-10,max=15) +
   annotate(geom = 'text', label = paste( "(R)^2 =", r2_dia ), 
            x = 10, 
            y = -5, 
@@ -529,6 +553,7 @@ rep_corr_dda / rep_corr_dia +
   plot_annotation(tag_levels = "A", title="Correlation between rep1 and rep2 half lives")
 ggsave(filename = "../../figures/ratios_model_plots/rep_correlation_half_life.png")
 
+#####################################################
 
 
 ## PLOT: Half life distribution
@@ -568,260 +593,5 @@ plot3_dda / plot3_dia +
   plot_annotation(tag_levels = "A")
 ggsave(filename = "../../figures/ratios_model_plots/density_turnover_rate_k.png")
 rm(plot3_dda, plot3_dia);gc()
-
-
-##
-## TODO
-## HERE
-##
-
-
-# Statistics --------------------------------------------------------------
-
-modeled_proteins <- intersect(pred_dda$master_protein_accessions, 
-                              pred_dia$master_protein_accessions)
-
-modelfactors_dda <- extract_model_factors(tidy_dda, modeled_proteins)
-modelfactors_dia <- extract_model_factors(tidy_dia, modeled_proteins)
-
-
-diff_dia <- diff_dia %>%
-  left_join(modelfactors_dia, by="master_protein_accessions")
-
-diff_dda <- diff_dda %>%
-  left_join(modelfactors_dda, by="master_protein_accessions")
-
-
-write.csv(diff_dda, file = "results/btz_results_dda.csv", row.names = FALSE)
-write.csv(diff_dia, file = "results/btz_results_dia.csv", row.names = FALSE)
-
-
-## halflife histograms per Birgit's suggestion
-# Make a histogram of the half lives
-plot_halflife <- function(diff_data){
-  
-  diff_data <- subset(diff_data, adj.p.value < 0.05)
-  
-  halflife_hist <- ggplot(diff_data) +  
-    geom_histogram(aes(x = DMSO),
-                   fill=cbPalette[1], color=cbPalette[1], alpha=0.5, bins=100) +  
-    geom_histogram(aes(x = bortezomib),
-                   fill=cbPalette[2], color=cbPalette[2], alpha=0.5, bins=100) +
-    theme_bw(base_size = 14) +
-    xlim(2, 16)+
-    labs(#title = "Turnover Rate distribution", 
-      x = "Halflife (hours)",
-      labels = c('DMSO', 'Bortezomib'))
-  
-  return(halflife_hist)
-  
-}
-
-halflives_dda <- plot_halflife(diff_dda) + labs(title = "DDA")
-halflives_dia <- plot_halflife(diff_dia) + labs(title = "DIA")
-
-halflives_dda / halflives_dia +
-  plot_layout() + 
-  plot_annotation(tag_levels = "A")
-ggsave(filename = "figures/btz_model_plots/halflives_hist.png", width = 10, height = 7)
-
-
-# plot_predictions pred_dia, pred_dda
-sig_models_dda <- plot_predictions(subset(pred_dda, 
-                                          master_protein_accessions %in% subset(diff_dda, adj.p.value < 0.5)$master_protein_accessions))
-sig_models_dia <- plot_predictions(subset(pred_dia, 
-                                          master_protein_accessions %in% subset(diff_dia, adj.p.value < 0.5)$master_protein_accessions))
-
-sig_models_dda + sig_models_dia
-
-# Comparison of DDA vs DIA----------------------------------------------------------
-
-#
-# protein level comparisons
-#
-plot_halflifecorr <- function(halflife_df){
-  ggplot(halflife_df, aes(x = DMSO_dia, y = DMSO_dda)) +
-    geom_point(alpha = 0.5) +
-    geom_abline(slope = 1, intercept = 0, color = 'red') +
-    #xlim(-50, 50) + ylim(-50, 50) +
-    theme_pander(base_size = 14) +
-    scale_color_brewer(palette = "Dark2") +
-    theme_pander(base_size = 14) +
-    #geom_text_repel(aes(label = ifelse(adj.p.value_dia < 0.01, gene_name_dia, ""), color="blue")) +
-    #geom_text_repel(aes(label = ifelse(adj.p.value_dda < 0.01, gene_name_dda, ""), color="green")) +
-    #geom_point(aes(color = ifelse(adj.p.value_dda < 0.01, "green", "black"), alpha = 0.5)) +
-    #geom_point(aes(color = ifelse(adj.p.value_dia < 0.01, "blue", "black"), alpha = 0.5)) +
-    #facet_wrap(~btz_conc) +
-    guides(color = FALSE) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      y = "halflife, DMSO (SILAC-DDA)",
-      x = "halflife, DMSO (SILAC-DIA)")
-}
-
-plot_pvalcorr <- function(halflife_df){
-  ggplot(halflife_df, aes(x = adj.p.value_dia, y = adj.p.value_dda)) +
-    geom_point(alpha = 0.5) +
-    #geom_abline(slope = 1, intercept = 0, color = 'red') +
-    geom_hline(yintercept = 0.05, color = 'red') +
-    geom_vline(xintercept = 0.05, color = 'red') +
-    #xlim(-50, 50) + ylim(-50, 50) +
-    theme_pander(base_size = 14) +
-    scale_color_brewer(palette = "Dark2") +
-    geom_text_repel(aes(label = ifelse(adj.p.value_dia < 0.01, gene_name_dia, ""), color="blue")) +
-    geom_text_repel(aes(label = ifelse(adj.p.value_dda < 0.01, gene_name_dda, ""), color="green")) +
-    #geom_rect(aes(xmin=0, xmax=0.05, ymin=0, ymax=0.05, color="black", alpha=0.5)) +
-    #geom_point(aes(color = ifelse(adj.p.value_dda < 0.01, "green", "black"), alpha = 0.5)) +
-    #geom_point(aes(color = ifelse(adj.p.value_dia < 0.01, "blue", "black"), alpha = 0.5)) +
-    #facet_wrap(~btz_conc) +
-    guides(color = FALSE) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      y = "adjusted p value (SILAC-DDA)",
-      x = "adjusted p value (SILAC-DIA)")
-}
-
-
-diff_all <- merge(diff_dda, diff_dia, 
-                  by="master_protein_accessions", 
-                  suffixes=c("_dda", "_dia"))
-
-plot_halflifecorr(diff_all)
-ggsave(filename = "figures/btz_model_plots/halflife_correlation.png", width = 10, height = 7)
-plot_pvalcorr(diff_all)
-ggsave(filename = "figures/btz_model_plots/pvalue_correlation.png", width = 10, height = 7)
-
-
-#
-# peptide level comparisons
-#
-
-plot_corr_peptide <- function(tidy_df){
-  ggplot(tidy_df, aes(x = half_life_dia, y = half_life_dda)) +
-    geom_point(alpha = 0.25) +
-    #scale_color_gradient("Spectral", name = "light abundance at time 0 (decile)") +
-    geom_abline(slope = 1, intercept = 0, color = 'red') +
-    geom_smooth(method = "lm", se = FALSE, color = 'gray') +
-    xlim(0, 150) + ylim(0, 150) +
-    theme_pander(base_size = 14) +
-    #scale_color_brewer(palette = "Dark2") +
-    #geom_text_repel(aes(label = ifelse(adj.p.value_dia < 0.01, gene_name_dia, ""), color="blue")) +
-    #geom_text_repel(aes(label = ifelse(adj.p.value_dda < 0.01, gene_name_dda, ""), color="green")) +
-    #geom_point(aes(color = ifelse(adj.p.value_dda < 0.01, "green", "black"), alpha = 0.5)) +
-    #geom_point(aes(color = ifelse(adj.p.value_dia < 0.01, "blue", "black"), alpha = 0.5)) +
-    #facet_wrap(~btz_conc) +
-    #guides(color = FALSE) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      y = "peptide halflife, DMSO (SILAC-DDA)",
-      x = "peptide halflife, DMSO (SILAC-DIA)")
-}
-
-plot_abund_halflife <- function(tidy_df){
-  temp1 <- ggplot(tidy_df) +
-    geom_boxplot(aes(x = factor(bin_dda), y = log2(half_life_dda), 
-                     fill="green", alpha=0.5)) +
-    scale_fill_identity(name = 'the fill', guide = 'legend',labels = c('DIA', 'DDA')) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      x = "abundance of light peptide at time zero (deciles)",
-      y = "log2 peptide halflife, DMSO")
-  temp2 <- ggplot(tidy_df) +
-    geom_boxplot(aes(x = factor(bin_dia), y = log2(half_life_dia), 
-                     fill="blue", alpha=0.5)) +
-    scale_fill_identity(name = 'the fill', guide = 'legend',labels = c('DIA', 'DDA')) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      x = "abundance of light peptide at time zero (deciles)",
-      y = "log2 peptide halflife, DMSO")
-  temp <- temp1 / temp2
-  return(temp)
-}
-
-plot_ntime_halflife <- function(tidy_df){
-  temp1 <- ggplot(tidy_df) +
-    geom_boxplot(aes(x = factor(n_dda), y = log2(half_life_dda), 
-                     fill="green", alpha=0.5)) +
-    geom_jitter(aes(x = factor(n_dia), y = log2(half_life_dia)), 
-                position=position_jitter(width=.1, height=0), alpha=0.1) +
-    scale_fill_identity(name = 'the fill', guide = 'legend',labels = c('DDA')) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      x = "timepoints available for halflife modeling",
-      y = "log2 peptide halflife, DMSO")
-  temp2 <- ggplot(tidy_df) +
-    geom_boxplot(aes(x = factor(n_dia), y = log2(half_life_dia), 
-                     fill="blue", alpha=0.5)) +
-    scale_fill_identity(name = 'the fill', guide = 'legend',labels = c('DIA')) +
-    geom_jitter(aes(x = factor(n_dia), y = log2(half_life_dia)), 
-                position=position_jitter(width=.1, height=0), alpha=0.1) +
-    labs(#title = "Delta (bortezomib/DMSO) Half-life",
-      x = "timepoints available for halflife modeling",
-      y = "log2 peptide halflife, DMSO")
-  temp <- temp1 / temp2
-  return(temp)
-}
-
-tidy_all <- merge(tidy_dda, tidy_dia, 
-                  by="sequence", 
-                  suffixes=c("_dda", "_dia"))
-tidy_all <- merge(tidy_all,
-                  subset(dda_input, dda_input$`File Name` == "20200828_QEHFX_lkp_pSILAC-DIA_btz_01_DDA_155", select=c("sequence", "light")), 
-                  by = "sequence")
-tidy_all <- rename(tidy_all, c("light_dda"="light"))
-tidy_all <- merge(tidy_all,
-                  subset(dia_input, dia_input$`File Name` == "20200828_QEHFX_lkp_pSILAC-DIA_btz_01_DIA_156", select=c("sequence", "light")), 
-                  by = "sequence")
-tidy_all <- rename(tidy_all, c("light_dia"="light"))
-tidy_all <- tidy_all %>%
-  mutate(bin_dda = floor(rank(light_dda) * 10 / (length(light_dda) + 1)),
-         bin_dia = floor(rank(light_dia) * 10 / (length(light_dia) + 1)))
-
-plot_corr_peptide(tidy_all)
-ggsave(filename = "figures/btz_model_plots/halflife_correlation_peptide.png", width = 10, height = 7)
-plot_abund_halflife(tidy_all)
-ggsave(filename = "figures/btz_model_plots/halflife_abundance_correlation.png", width = 10, height = 7)
-plot_ntime_halflife(tidy_all)
-ggsave(filename = "figures/btz_model_plots/halflife_timepoint_correlation.png", width = 10, height = 7)
-
-
-density_halflife_dda <- ggplot(tidy_all) + 
-  geom_density(aes(x=half_life_dda, fill=factor(btz_conc_dda)), alpha=0.5) +
-  theme_pander(base_size = 14) +
-  labs(title = "DDA",
-       x = "Protein half life (hours)") +
-  xlim(-50, 200)
-density_halflife_dia <- ggplot(tidy_all) + 
-  geom_density(aes(x=half_life_dia, fill=factor(btz_conc_dia)), alpha=0.5) +
-  labs(title = "DIA",
-       x = "Protein half life (hours)") +
-  theme_pander(base_size = 14) +
-  xlim(-50, 200)
-
-density_halflife_dda_zoom <- ggplot(tidy_all) + 
-  geom_density(aes(x=half_life_dda, fill=factor(btz_conc_dda)), alpha=0.5) +
-  theme_pander(base_size = 14) +
-  labs(title = "DDA",
-       x = "Protein half life (hours)") +
-  xlim(100, 200)
-density_halflife_dia_zoom <- ggplot(tidy_all) + 
-  geom_density(aes(x=half_life_dia, fill=factor(btz_conc_dia)), alpha=0.5) +
-  labs(title = "DIA",
-       x = "Protein half life (hours)") +
-  theme_pander(base_size = 14) +
-  xlim(100, 200)
-
-temp1 <- density_halflife_dda / density_halflife_dia  +
-  plot_layout() + 
-  plot_annotation(tag_levels = "A")
-temp2 <- density_halflife_dda_zoom / density_halflife_dia_zoom +
-  plot_layout() + 
-  plot_annotation(tag_levels = "A")
-temp1 + temp2
-ggsave(filename = "figures/btz_model_plots/density_halflife.png", width = 10, height = 14)
-
-
-## stat checks
-length(unique(dda_input$master_protein_accessions))
-length(unique(diff_dda$master_protein_accessions))
-length(unique(dia_input$master_protein_accessions))
-length(unique(diff_dia$master_protein_accessions))
-
-(sum(is.na(dda_input$fraction))/nrow(dda_input))
-(sum(is.na(dia_input$fraction))/nrow(dia_input))
 
 
