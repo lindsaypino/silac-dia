@@ -526,28 +526,29 @@ lm_eqn <- function(x,y){
   a <- ifelse(sign(a) >= 0, 
               paste0(" + ", format(a, digits = 4)), 
               paste0(" - ", format(-a, digits = 4))  )
-  r2 <- format(summary(m)$r.squared, digits = 3)
+  eq1 <- substitute( paste( italic(y) == b, italic(x), a ), 
+                     list(a = a, 
+                          b = format(coef(m)[2], digits = 4)))
+  eq2 <- substitute( paste( italic(R)^2 == r2 ), 
+                     list(r2 = format(summary(m)$r.squared, digits = 3)))
+  c( as.character(as.expression(eq1)), as.character(as.expression(eq2)))
 }
 
 # calculate R^2 for the correlation
-r2_dda <- lm_eqn(log2(tidy_dda$half_life_rep2/24), log2(tidy_dda$half_life_rep1/24))
-r2_dia <- lm_eqn(log2(tidy_dia$half_life_rep2/24), log2(tidy_dia$half_life_rep1/24))
+labels_dda <- lm_eqn(log2(tidy_dda$half_life_rep2/24), log2(tidy_dda$half_life_rep1/24))
+labels_dia <- lm_eqn(log2(tidy_dia$half_life_rep2/24), log2(tidy_dia$half_life_rep1/24))
 
 # make each correlation plot, plus a few specific parameters to make it prettier
 rep_corr_dda <- plot_halfliferep_corr(tidy_dda) + labs(subtitle = "DDA") +
   xlim(min=-15,max=15) + 
   ylim(min=-15,max=15) +
-  annotate(geom = 'text', label = paste( "(R)^2 =", r2_dda ), 
-           x = 10, 
-           y = -5, 
-           hjust = 0, vjust = 0)
+  geom_text(x = 12, y = -9, label = labels_dda[1], parse = TRUE,  check_overlap = TRUE ) +
+  geom_text(x = 12, y = -11, label = labels_dda[2], parse = TRUE, check_overlap = TRUE )
 rep_corr_dia <- plot_halfliferep_corr(tidy_dia) + labs(subtitle = "DIA") +
   xlim(min=-15,max=15) +
   ylim(min=-15,max=15) +
-  annotate(geom = 'text', label = paste( "(R)^2 =", r2_dia ), 
-           x = 10, 
-           y = -5, 
-           hjust = 0, vjust = 0)
+  geom_text(x = 12, y = -9, label = labels_dia[1], parse = TRUE,  check_overlap = TRUE ) +
+  geom_text(x = 12, y = -11, label = labels_dia[2], parse = TRUE, check_overlap = TRUE )
 
 rep_corr_dda / rep_corr_dia +
   plot_annotation(tag_levels = "A", title="Correlation between rep1 and rep2 half lives")
